@@ -406,16 +406,16 @@ func runPeers(ctx context.Context, c Command, opts Options) error {
 		enc.SetEscapeHTML(false)
 		return enc.Encode(map[string]any{"room": c.Room, "members": members})
 	}
-	_, _ = fmt.Fprintf(opts.Output, "ROOM  %s\n", c.Room)
-	_, _ = fmt.Fprintf(opts.Output, "USER\tROLE\tSESSION\n")
+	w := tabwriter.NewWriter(opts.Output, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "USER\tROLE\tSESSION")
 	for _, m := range members {
 		role := "client"
 		if m.Peer {
 			role = "node"
 		}
-		_, _ = fmt.Fprintf(opts.Output, "%s\t%s\t%s\n", sanitizeText(m.User), role, m.Session)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", sanitizeText(m.User), role, m.Session)
 	}
-	return nil
+	return w.Flush()
 }
 
 func frameJSON(f room.Frame) string {
