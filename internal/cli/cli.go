@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/DR1N0/lanlobby-cli/internal/room"
 	"github.com/DR1N0/lanlobby-cli/internal/version"
@@ -22,7 +23,7 @@ const Usage = `Usage:
   lanlobby say ROOM MESSAGE [--as NAME] [--peer ADDR]
   lanlobby tail ROOM [--as NAME] [--peer ADDR] [--json]
   lanlobby peers ROOM [--peer ADDR] [--json]
-  lanlobby version [--short]
+  lanlobby version [--short] [--json]
 
 serve runs a foreground room node and prints the join commands for this and
 other machines. join, say, tail and peers connect to a node: the local one by
@@ -214,8 +215,31 @@ func runVersion(c Command, opts Options) int {
 		_, _ = fmt.Fprintln(opts.Output, sanitizeText(v.GitVersion))
 		return 0
 	}
-	_, _ = fmt.Fprintf(opts.Output, "lanlobby %s\nGitCommit: %s\nGitTreeState: %s\nBuildDate: %s\nGoVersion: %s\nPlatform: %s\n",
-		sanitizeText(v.GitVersion), sanitizeText(v.GitCommit), sanitizeText(v.GitTreeState), sanitizeText(v.BuildDate), v.GoVersion, v.Platform)
+	if c.JSON {
+		enc := json.NewEncoder(opts.Output)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(map[string]string{
+			"version":  v.GitVersion,
+			"commit":   v.GitCommit,
+			"state":    v.GitTreeState,
+			"built":    v.BuildDate,
+			"go":       v.GoVersion,
+			"platform": v.Platform,
+		})
+		return 0
+	}
+	w := tabwriter.NewWriter(opts.Output, 0, 0, 2, ' ', 0)
+	for _, row := range [][2]string{
+		{"lanlobby", v.GitVersion},
+		{"  commit", v.GitCommit},
+		{"  state", v.GitTreeState},
+		{"  built", v.BuildDate},
+		{"  go", v.GoVersion},
+		{"  platform", v.Platform},
+	} {
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", row[0], sanitizeText(row[1]))
+	}
+	_ = w.Flush()
 	return 0
 }
 

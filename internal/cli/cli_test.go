@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"flag"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/DR1N0/lanlobby-cli/internal/version"
 )
 
 func TestParseCommands(t *testing.T) {
@@ -54,5 +60,39 @@ func TestParseRejects(t *testing.T) {
 	}
 	if _, err := Parse([]string{"--help"}); err != flag.ErrHelp {
 		t.Fatalf("help: %v", err)
+	}
+}
+
+func TestVersionOutput(t *testing.T) {
+	var out bytes.Buffer
+	if code := Run(context.Background(), []string{"version"}, Options{Output: &out}); code != 0 {
+		t.Fatalf("version exit %d", code)
+	}
+	for _, want := range []string{"lanlobby", "commit", "state", "built", "go ", "platform"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("version output missing %q:\n%s", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if code := Run(context.Background(), []string{"version", "--json"}, Options{Output: &out}); code != 0 {
+		t.Fatalf("version --json exit %d", code)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(out.Bytes(), &m); err != nil {
+		t.Fatalf("invalid json %q: %v", out.String(), err)
+	}
+	for _, k := range []string{"version", "commit", "state", "built", "go", "platform"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("json missing %q: %v", k, m)
+		}
+	}
+
+	out.Reset()
+	if code := Run(context.Background(), []string{"version", "--short"}, Options{Output: &out}); code != 0 {
+		t.Fatalf("version --short exit %d", code)
+	}
+	if got := out.String(); got != version.Get().GitVersion+"\n" {
+		t.Fatalf("short version: %q", got)
 	}
 }

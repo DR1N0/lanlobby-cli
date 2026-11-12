@@ -43,8 +43,18 @@ Alternatively, `go install ./cmd/lanlobby` installs into `GOBIN`, or `$(go env G
 
 ```bash
 lanlobby version
+# lanlobby   v0.0.1
+#   commit   unknown
+#   state    unknown
+#   built    unknown
+#   go       go1.27.3
+#   platform windows/amd64
+
 lanlobby version --short
 # v0.0.1
+
+lanlobby version --json
+# {"built":"unknown","commit":"unknown","go":"go1.27.3","platform":"windows/amd64","state":"unknown","version":"v0.0.1"}
 ```
 
 `make build` runs `hack/generate-ldflags.sh` and injects the version tag, Git commit, worktree state, and UTC build date with Go `-ldflags -X`. The full command also prints the Go version and target platform. It is local-only: no LAN discovery or update-server requests.
@@ -166,8 +176,6 @@ go test -race ./...
 ```
 
 The unit tests start real nodes on loopback and cover two-client relay, cross-node relay, peer reconnect, duplicate-name rejection, and frame bounds. They need no LAN.
-
-The tests in `internal/discovery`, `internal/session`, `internal/local`, and `integration` still cover the previous multicast implementation. That code remains in the tree for reference but is no longer used by the CLI.
 
 ### Two-machine smoke test
 

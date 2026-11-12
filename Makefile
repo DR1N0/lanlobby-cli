@@ -23,11 +23,6 @@ help: ## Display this help message
 clean: ## Clean up build artifacts
 	rm -rf bin/
 
-.PHONY: vendor
-vendor: ## Update Go module dependencies
-	$(GO) mod tidy
-	$(GO) mod vendor
-
 
 ##@ Build and Test
 
