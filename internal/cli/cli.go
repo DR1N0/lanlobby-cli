@@ -391,7 +391,7 @@ func runTail(ctx context.Context, c Command, opts Options) error {
 
 func runSay(ctx context.Context, c Command, opts Options) error {
 	addr := peerAddr(c)
-	client, err := room.Dial(ctx, addr, c.Room, c.User)
+	client, err := room.DialEphemeral(ctx, addr, c.Room, c.User)
 	if err != nil {
 		return err
 	}

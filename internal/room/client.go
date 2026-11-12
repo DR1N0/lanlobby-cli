@@ -25,13 +25,23 @@ type Client struct {
 // Dial connects to a node and completes the hello/welcome handshake. An empty
 // user asks the node to assign a unique default name.
 func Dial(ctx context.Context, addr, room, user string) (*Client, error) {
+	return dial(ctx, addr, room, user, false)
+}
+
+// DialEphemeral joins without announcing membership, so a one-shot send does
+// not emit join/leave notices to the room.
+func DialEphemeral(ctx context.Context, addr, room, user string) (*Client, error) {
+	return dial(ctx, addr, room, user, true)
+}
+
+func dial(ctx context.Context, addr, room, user string, ephemeral bool) (*Client, error) {
 	d := net.Dialer{Timeout: DialTimeout}
 	nc, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", addr, err)
 	}
 	c := &Client{conn: nc, enc: bufio.NewWriter(nc), dec: NewReader(nc)}
-	hello := Frame{Type: TypeHello, Room: room, User: SanitizeName(user), Host: hostName(), Role: RoleClient}
+	hello := Frame{Type: TypeHello, Room: room, User: SanitizeName(user), Host: hostName(), Role: RoleClient, Ephemeral: ephemeral}
 	if err := c.send(hello); err != nil {
 		_ = nc.Close()
 		return nil, err
@@ -40,7 +50,7 @@ func Dial(ctx context.Context, addr, room, user string) (*Client, error) {
 	f, err := c.dec.Read()
 	if err != nil {
 		_ = nc.Close()
-		return nil, err
+		return nil, fmt.Errorf("handshake with %s failed: %w (both ends must run the same build and the same room)", addr, err)
 	}
 	_ = nc.SetReadDeadline(time.Time{})
 	if f.Type == TypeError {

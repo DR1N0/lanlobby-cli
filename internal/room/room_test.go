@@ -122,3 +122,52 @@ func TestDuplicateNameRejected(t *testing.T) {
 		t.Fatal("duplicate name was accepted")
 	}
 }
+
+func TestEphemeralSendHasNoNotices(t *testing.T) {
+	addr := startServer(t, &Server{Room: "dev", Name: "node"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	watcher, err := Dial(ctx, addr, "dev", "watcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+
+	frames := make(chan Frame, 8)
+	go func() { _ = watcher.Receive(ctx, func(f Frame) { frames <- f }) }()
+
+	sender, err := DialEphemeral(ctx, addr, "dev", "once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sender.Send("hi"); err != nil {
+		t.Fatal(err)
+	}
+	sender.Close()
+
+	deadline := time.After(700 * time.Millisecond)
+	notices, messages := 0, 0
+loop:
+	for {
+		select {
+		case f := <-frames:
+			switch f.Type {
+			case TypeNotice:
+				notices++
+			case TypeMessage:
+				if f.Body == "hi" {
+					messages++
+				}
+			}
+		case <-deadline:
+			break loop
+		}
+	}
+	if notices != 0 {
+		t.Fatalf("ephemeral send produced %d notices", notices)
+	}
+	if messages != 1 {
+		t.Fatalf("expected one message, got %d", messages)
+	}
+}

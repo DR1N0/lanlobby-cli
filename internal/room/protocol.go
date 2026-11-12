@@ -60,18 +60,19 @@ type Member struct {
 // Frame is one newline-terminated JSON object. Every connection carries
 // frames in both directions after a hello/welcome handshake.
 type Frame struct {
-	Version int      `json:"v"`
-	Type    string   `json:"type"`
-	Room    string   `json:"room,omitempty"`
-	User    string   `json:"user,omitempty"`
-	Session string   `json:"session,omitempty"`
-	Host    string   `json:"host,omitempty"`
-	Role    string   `json:"role,omitempty"`
-	Origin  string   `json:"origin,omitempty"`
-	Seq     int64    `json:"seq,omitempty"`
-	Body    string   `json:"body,omitempty"`
-	Members []Member `json:"members,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	Version   int      `json:"v"`
+	Type      string   `json:"type"`
+	Room      string   `json:"room,omitempty"`
+	User      string   `json:"user,omitempty"`
+	Session   string   `json:"session,omitempty"`
+	Host      string   `json:"host,omitempty"`
+	Role      string   `json:"role,omitempty"`
+	Ephemeral bool     `json:"ephemeral,omitempty"`
+	Origin    string   `json:"origin,omitempty"`
+	Seq       int64    `json:"seq,omitempty"`
+	Body      string   `json:"body,omitempty"`
+	Members   []Member `json:"members,omitempty"`
+	Error     string   `json:"error,omitempty"`
 }
 
 // SanitizeName mirrors the old CLI rules: printable, no whitespace or

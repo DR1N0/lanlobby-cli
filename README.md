@@ -91,7 +91,7 @@ lanlobby serve: room "dev" as "mac"
 # interactive member: reads stdin, prints live messages
 lanlobby join dev --as alice
 
-# one-shot message from a script or agent; returns 0 only after the node acknowledges it
+# one-shot message from a script or agent; acknowledged, no join/leave notice
 lanlobby say dev --as agent-a "build finished"
 
 # stream messages; --json emits one JSON object per line

@@ -48,18 +48,19 @@ type signal struct {
 }
 
 type conn struct {
-	srv      *Server
-	nc       net.Conn
-	enc      *bufio.Writer
-	dec      *Reader
-	mu       sync.Mutex
-	role     string
-	user     string
-	session  string
-	peer     bool
-	lastSeen atomic.Int64 // unix nanoseconds
-	closed   chan struct{}
-	once     sync.Once
+	srv       *Server
+	nc        net.Conn
+	enc       *bufio.Writer
+	dec       *Reader
+	mu        sync.Mutex
+	role      string
+	user      string
+	session   string
+	peer      bool
+	ephemeral bool
+	lastSeen  atomic.Int64 // unix nanoseconds
+	closed    chan struct{}
+	once      sync.Once
 }
 
 // Run starts the node and blocks until ctx is cancelled.
@@ -148,7 +149,9 @@ func (s *Server) acceptLoop() {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			_ = s.handle(nc, false)
+			if err := s.handle(nc, false); err != nil {
+				s.logf("connection %s closed: %v", nc.RemoteAddr(), err)
+			}
 		}()
 	}
 }
@@ -256,6 +259,7 @@ func (s *Server) welcome(c *conn, hello Frame) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if c.role == RoleClient {
+		c.ephemeral = hello.Ephemeral
 		if hello.User == "" {
 			c.user = s.newNameLocked(hello.Host)
 		} else {
@@ -306,6 +310,9 @@ func (s *Server) register(c *conn) {
 	s.members[c.session] = &Member{User: c.user, Session: c.session, Peer: c.peer}
 	s.mu.Unlock()
 
+	if c.ephemeral {
+		return
+	}
 	what := c.user
 	if c.peer {
 		what = c.user + " (node)"
@@ -320,6 +327,9 @@ func (s *Server) unregister(c *conn) {
 	delete(s.members, c.session)
 	s.mu.Unlock()
 	if !ok {
+		return
+	}
+	if c.ephemeral {
 		return
 	}
 	what := c.user
