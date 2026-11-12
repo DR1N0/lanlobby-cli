@@ -27,6 +27,9 @@ type Server struct {
 	// OnReady is called once the listen socket is bound, before accepting
 	// connections. It is where a CLI prints the join commands.
 	OnReady func(addr string)
+	// Output, when set, receives the live room stream (user: body), so a
+	// foreground node doubles as a tail without a second command.
+	Output io.Writer
 
 	ln        net.Listener
 	mu        sync.Mutex
@@ -407,6 +410,9 @@ func (c *conn) handleFrame(f Frame) error {
 		}
 		if !s.firstSeen(f.Origin, f.Seq) {
 			return nil
+		}
+		if s.Output != nil {
+			_, _ = fmt.Fprintf(s.Output, "%s: %s\n", wire.SafeText(f.User), wire.SafeText(f.Body))
 		}
 		s.broadcast(c, Frame{Type: TypeMessage, User: f.User, Origin: f.Origin, Seq: f.Seq, Body: f.Body})
 		if c.role == RoleClient {

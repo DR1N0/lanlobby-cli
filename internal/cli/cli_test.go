@@ -24,7 +24,7 @@ func TestParseCommands(t *testing.T) {
 		{[]string{"join", "dev", "--as", "alice"}, Command{Kind: "join", Room: "dev", User: "alice"}},
 		{[]string{"join", "dev", "--peer", "192.168.1.6:7717"}, Command{Kind: "join", Room: "dev", Peers: []string{"192.168.1.6:7717"}}},
 		{[]string{"say", "dev", "--as", "bob", "hello world"}, Command{Kind: "say", Room: "dev", User: "bob", Body: "hello world"}},
-		{[]string{"tail", "dev", "--json"}, Command{Kind: "tail", Room: "dev", JSON: true}},
+		{[]string{"join", "dev", "--read-only", "--json"}, Command{Kind: "join", Room: "dev", ReadOnly: true, JSON: true}},
 		{[]string{"peers", "dev", "--peer", "x:1"}, Command{Kind: "peers", Room: "dev", Peers: []string{"x:1"}}},
 		{[]string{"version", "--short"}, Command{Kind: "version", Short: true}},
 		{[]string{"serve", "--room=dev"}, Command{Kind: "serve", Room: "dev"}},

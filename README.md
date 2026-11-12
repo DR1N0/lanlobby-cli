@@ -2,7 +2,7 @@
 
 Live LAN chat for agents and terminals. **Pure CLI. Direct TCP. No central server. No history.**
 
-Each machine runs one foreground node (`serve`). Nodes connect to each other only when given an explicit `--peer`; clients (`join`, `say`, `tail`, `peers`) talk to a node over TCP. No multicast discovery, leader, account, database, TUI, or Web UI.
+Each machine runs one foreground node (`serve`). Nodes connect to each other only when given an explicit `--peer`; clients (`join`, `say`, `peers`) talk to a node over TCP. A node streams the room to its terminal, so `serve` alone is enough to watch a conversation. No multicast discovery, leader, account, database, TUI, or Web UI.
 
 ## Build
 
@@ -91,17 +91,17 @@ lanlobby serve: room "dev" as "mac"
 # interactive member: reads stdin, prints live messages
 lanlobby join dev --as alice
 
+# watch only: no stdin, just the live stream (add --json for one object per line)
+lanlobby join dev --read-only --json
+
 # one-shot message from a script or agent; acknowledged, no join/leave notice
 lanlobby say dev --as agent-a "build finished"
-
-# stream messages; --json emits one JSON object per line
-lanlobby tail dev --json
 
 # roster: clients and peer nodes
 lanlobby peers dev
 ```
 
-`join`, `say`, `tail` and `peers` connect to `127.0.0.1:7717` by default. Use `--peer host:port` for a node on another machine:
+`join`, `say` and `peers` connect to `127.0.0.1:7717` by default. Use `--peer host:port` for a node on another machine:
 
 ```bash
 lanlobby join dev --as alice --peer 192.168.1.6:7717
@@ -144,12 +144,12 @@ There is no multicast or broadcast dependency: a plain TCP path between the mach
 ## Output and delivery
 
 - No prompts, ANSI colors, cursor movement, or full-screen interface.
-- `join` reads stdin, one message per line. `say` takes one quoted message. `tail` never writes to the room. `--json` makes `join` and `tail` emit one JSON object per line instead of `NAME: MESSAGE`.
+- `serve` prints the room stream (`NAME: MESSAGE`) to stdout as messages arrive; `join` does the same and also reads stdin, one message per line. `join --read-only` skips stdin. `say` takes one quoted message and never prints the room. `--json` makes `join` emit one JSON object per line instead of `NAME: MESSAGE`.
 - stdout is the message stream. Status, usage errors, and delivery errors go to stderr.
 - Exit codes: `0` success/help/clean interruption, `1` runtime or delivery error, `2` invalid command or arguments.
 - Names are 1–64 UTF-8 bytes without whitespace, control, or formatting characters. Messages are 1–8 KiB of UTF-8 text.
 - A `say` succeeds only after the node acknowledges the message; the node relays it once to every other live client and peer node. There is no global ordering guarantee across nodes.
-- Node-to-node connections reconnect automatically. `join` and `tail` do not reconnect on their own: rerun them after their node restarts.
+- Node-to-node connections reconnect automatically. `join` does not reconnect on its own: rerun it after its node restarts.
 
 ## No history
 
@@ -183,5 +183,5 @@ The unit tests start real nodes on loopback and cover two-client relay, cross-no
 2. On A: `lanlobby serve --room dev --as mac --listen 0.0.0.0:7717`. On B: `lanlobby serve --room dev --as win --listen 0.0.0.0:7717 --peer <A-ip>:7717`.
 3. Allow the program through each firewall (see Firewalls). `lanlobby peers dev` on either side should list the other node.
 4. `lanlobby join dev --as alice` on A and `lanlobby say dev "hello" --as bob` on B: the message must appear on A. Repeat in the other direction.
-5. `lanlobby tail dev --json` should produce one JSON object per line with `user`, `body`, and `seq`.
-6. Restart A's node; B should reconnect within a few seconds. Restart `join`/`tail` after their node restarts.
+5. `lanlobby join dev --read-only --json` should produce one JSON object per line with `user`, `body`, and `seq`.
+6. Restart A's node; B should reconnect within a few seconds. Restart `join` after its node restarts.

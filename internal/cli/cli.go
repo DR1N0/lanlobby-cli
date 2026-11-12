@@ -19,15 +19,16 @@ import (
 
 const Usage = `Usage:
   lanlobby serve --room ROOM [--as NAME] [--listen ADDR] [--peer ADDR ...] [--advertise IP] [--debug]
-  lanlobby join ROOM [--as NAME] [--peer ADDR] [--json]
+  lanlobby join ROOM [--as NAME] [--peer ADDR] [--read-only] [--json]
   lanlobby say ROOM MESSAGE [--as NAME] [--peer ADDR]
-  lanlobby tail ROOM [--as NAME] [--peer ADDR] [--json]
   lanlobby peers ROOM [--peer ADDR] [--json]
   lanlobby version [--short] [--json]
 
 serve runs a foreground room node and prints the join commands for this and
-other machines. join, say, tail and peers connect to a node: the local one by
-default (127.0.0.1:7717), or --peer host:port for a remote one.
+other machines and streams the room to stdout as it arrives. join, say and
+peers connect to a node: the local one by default (127.0.0.1:7717), or
+--peer host:port for a remote one. join --read-only watches without reading
+stdin.
 
 Nodes talk to each other only when started with --peer; there is no multicast
 discovery. Chat messages are relayed by the node and never stored.
@@ -45,6 +46,7 @@ type Command struct {
 	Debug     bool
 	JSON      bool
 	Short     bool
+	ReadOnly  bool
 }
 
 // Parse accepts flags in any position, collects positional arguments, and
@@ -117,6 +119,8 @@ func Parse(args []string) (Command, error) {
 			c.Debug = true
 		case "json":
 			c.JSON = true
+		case "read-only":
+			c.ReadOnly = true
 		case "short":
 			c.Short = true
 		case "help", "h":
@@ -138,9 +142,9 @@ func Parse(args []string) (Command, error) {
 		if len(pos) != 0 {
 			return c, errors.New("serve takes no positional arguments")
 		}
-	case "join", "tail":
+	case "join":
 		if len(pos) != 1 {
-			return c, fmt.Errorf("%s requires ROOM", c.Kind)
+			return c, errors.New("join requires ROOM")
 		}
 		c.Room = pos[0]
 	case "say":
@@ -194,8 +198,6 @@ func Run(ctx context.Context, args []string, opts Options) int {
 		err = runJoin(ctx, c, opts)
 	case "say":
 		err = runSay(ctx, c, opts)
-	case "tail":
-		err = runTail(ctx, c, opts)
 	case "peers":
 		err = runPeers(ctx, c, opts)
 	}
@@ -266,6 +268,7 @@ func runServe(ctx context.Context, c Command, opts Options) error {
 		Peers:       c.Peers,
 		Debug:       c.Debug,
 		Diagnostics: opts.Diagnostics,
+		Output:      opts.Output,
 	}
 	srv.OnReady = func(addr string) {
 		host, port := splitHostPort(addr)
@@ -330,22 +333,24 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 
 	joinCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go func() {
-		defer cancel()
-		sc := bufio.NewScanner(opts.Input)
-		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if line == "" {
-				continue
+	if !c.ReadOnly {
+		go func() {
+			defer cancel()
+			sc := bufio.NewScanner(opts.Input)
+			for sc.Scan() {
+				line := strings.TrimSpace(sc.Text())
+				if line == "" {
+					continue
+				}
+				if _, err := client.Send(line); err != nil {
+					return
+				}
+				if !c.JSON {
+					_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(client.User), sanitizeText(line))
+				}
 			}
-			if _, err := client.Send(line); err != nil {
-				return
-			}
-			if !c.JSON {
-				_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(client.User), sanitizeText(line))
-			}
-		}
-	}()
+		}()
+	}
 
 	err = client.Receive(joinCtx, func(f room.Frame) {
 		if c.JSON {
@@ -363,30 +368,6 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 		return nil
 	}
 	return err
-}
-
-func runTail(ctx context.Context, c Command, opts Options) error {
-	addr := peerAddr(c)
-	client, err := room.Dial(ctx, addr, c.Room, c.User)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-	if !c.JSON {
-		_, _ = fmt.Fprintf(opts.Output, "tailing %q via %s as %q\n", c.Room, addr, client.User)
-	}
-	return client.Receive(ctx, func(f room.Frame) {
-		if c.JSON {
-			_, _ = fmt.Fprintln(opts.Output, frameJSON(f))
-			return
-		}
-		switch f.Type {
-		case room.TypeMessage:
-			_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(f.User), sanitizeText(f.Body))
-		case room.TypeNotice:
-			_, _ = fmt.Fprintf(opts.Output, "* %s\n", sanitizeText(f.Body))
-		}
-	})
 }
 
 func runSay(ctx context.Context, c Command, opts Options) error {
