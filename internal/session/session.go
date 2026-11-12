@@ -116,6 +116,10 @@ func Run(parent context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	var discoveryErrors <-chan error
+	if source, ok := ad.(interface{ Errors() <-chan error }); ok {
+		discoveryErrors = source.Errors()
+	}
 	// Withdrawal happens only after the send gate has closed.
 	defer func() {
 		s.mu.Lock()
@@ -154,6 +158,8 @@ func Run(parent context.Context, opts Options) error {
 		return nil
 	case err := <-s.fatal:
 		return err
+	case err := <-discoveryErrors:
+		return fmt.Errorf("LAN discovery unavailable: %w", err)
 	case err := <-outputError:
 		return fmt.Errorf("write message stream: %w", err)
 	}

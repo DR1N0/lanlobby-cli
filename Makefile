@@ -8,6 +8,8 @@ NC := \033[0m
 CLITARGET := lanlobby
 GO ?= go
 LDFLAGS ?= -s -w
+BUILD_TAG ?= v0.0.1
+export BUILD_TAG
 
 ##@ General
 
@@ -26,7 +28,7 @@ vendor: ## Update Go module dependencies
 	$(GO) mod tidy
 	$(GO) mod vendor
 
-	
+
 ##@ Build and Test
 
 .PHONY: test
@@ -35,10 +37,12 @@ test: ## Run unit tests
 
 .PHONY: build
 build: ## Build darwin/arm64, linux/amd64, and windows/amd64 binaries
-	mkdir -p bin/darwin_arm bin/linux bin/windows
-	@printf 'Building binary for darwin/arm64\n'
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/darwin_arm/$(CLITARGET) ./cmd/lanlobby
-	@printf 'Building binary for linux/amd64\n'
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/linux/$(CLITARGET) ./cmd/lanlobby
-	@printf 'Building binary for windows/amd64\n'
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/windows/$(CLITARGET).exe ./cmd/lanlobby
+	mkdir -p bin/darwin bin/linux bin/windows
+	@set -eu; \
+	version_ldflags="$$(sh hack/generate-ldflags.sh)"; \
+	printf 'Building binary for darwin/arm64 (%s)\n' "$$BUILD_TAG"; \
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS) $$version_ldflags" -o bin/darwin/$(CLITARGET) ./cmd/lanlobby; \
+	printf 'Building binary for linux/amd64 (%s)\n' "$$BUILD_TAG"; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS) $$version_ldflags" -o bin/linux/$(CLITARGET) ./cmd/lanlobby; \
+	printf 'Building binary for windows/amd64 (%s)\n' "$$BUILD_TAG"; \
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS) $$version_ldflags" -o bin/windows/$(CLITARGET).exe ./cmd/lanlobby

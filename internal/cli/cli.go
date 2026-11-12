@@ -1,4 +1,4 @@
-// Package cli provides the four text-only lanlobby commands.
+// Package cli provides the text-only lanlobby commands.
 package cli
 
 import (
@@ -13,18 +13,21 @@ import (
 
 	"github.com/DR1N0/lanlobby-cli/internal/discovery"
 	"github.com/DR1N0/lanlobby-cli/internal/session"
+	"github.com/DR1N0/lanlobby-cli/internal/version"
 	"github.com/DR1N0/lanlobby-cli/internal/wire"
 )
 
 const Usage = `Usage:
-  lanlobby join ROOM --as NAME [--interface IFACE]
+  lanlobby join ROOM --as NAME [--interface IFACE] [--debug]
   lanlobby send ROOM --as NAME "MESSAGE"
-  lanlobby list room [--interface IFACE]
-  lanlobby list user --room=ROOM [--interface IFACE]
+  lanlobby list room [--interface IFACE] [--debug]
+  lanlobby list user --room=ROOM [--interface IFACE] [--debug]
+  lanlobby version [--short]
 
 join stays in the foreground and streams live messages to stdout.
 send requires a matching local join in another terminal. Ctrl-C leaves.
-LAN discovery uses mDNS/UDP; chat messages use direct TCP. No history.
+LAN discovery uses UDP multicast; chat messages use direct TCP. No history.
+--debug prints discovery and TCP verification diagnostics to stderr.
 `
 
 type Command struct {
@@ -33,6 +36,8 @@ type Command struct {
 	User      string
 	Body      string
 	Interface string
+	Short     bool
+	Debug     bool
 }
 
 func Parse(args []string) (Command, error) {
@@ -44,6 +49,14 @@ func Parse(args []string) (Command, error) {
 	f := flag.NewFlagSet("lanlobby "+c.Kind, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	switch c.Kind {
+	case "version":
+		f.BoolVar(&c.Short, "short", false, "print only the version tag")
+		if err := f.Parse(args[1:]); err != nil {
+			return c, err
+		}
+		if f.NArg() != 0 {
+			return c, errors.New("unexpected version arguments")
+		}
 	case "join", "send":
 		if len(args) < 2 {
 			return c, errors.New("missing ROOM")
@@ -52,6 +65,7 @@ func Parse(args []string) (Command, error) {
 		f.StringVar(&c.User, "as", "", "local member name")
 		if c.Kind == "join" {
 			f.StringVar(&c.Interface, "interface", "", "LAN interface")
+			f.BoolVar(&c.Debug, "debug", false, "discovery diagnostics on stderr")
 		}
 		if err := f.Parse(args[2:]); err != nil {
 			return c, err
@@ -79,6 +93,7 @@ func Parse(args []string) (Command, error) {
 			f.StringVar(&c.Room, "room", "", "room to list")
 		}
 		f.StringVar(&c.Interface, "interface", "", "LAN interface")
+		f.BoolVar(&c.Debug, "debug", false, "discovery diagnostics on stderr")
 		if err := f.Parse(args[2:]); err != nil {
 			return c, err
 		}
@@ -88,7 +103,7 @@ func Parse(args []string) (Command, error) {
 	default:
 		return c, fmt.Errorf("unknown command %q", c.Kind)
 	}
-	if c.Kind != "list-room" {
+	if c.Kind != "list-room" && c.Kind != "version" {
 		if err := wire.Identifier(c.Room); err != nil {
 			return c, fmt.Errorf("room: %w", err)
 		}
@@ -121,12 +136,26 @@ func Run(ctx context.Context, args []string, opts Options) int {
 		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n\n%s", wire.SafeText(err.Error()), Usage)
 		return 2
 	}
-	if c.Kind == "send" {
+	if c.Kind == "version" {
+		v := version.Get()
+		if c.Short {
+			_, err = fmt.Fprintln(opts.Output, wire.SafeText(v.GitVersion))
+		} else {
+			_, err = fmt.Fprintf(opts.Output, "lanlobby %s\nGitCommit: %s\nGitTreeState: %s\nBuildDate: %s\nGoVersion: %s\nPlatform: %s\n",
+				wire.SafeText(v.GitVersion), wire.SafeText(v.GitCommit), wire.SafeText(v.GitTreeState), wire.SafeText(v.BuildDate), v.GoVersion, v.Platform)
+		}
+	} else if c.Kind == "send" {
 		err = session.Send(ctx, opts.RuntimeDir, c.Room, c.User, c.Body)
 	} else {
 		network := opts.Network
+		// Status and discovery share one bounded, nonblocking stderr queue.
+		events, finish := startDiagnostics(opts.Diagnostics, c.Debug)
+		opts.Diagnostics = diagnosticWriter{events: events}
+		defer finish()
 		if network == nil {
-			network, err = discovery.New(c.Interface)
+			network, err = discovery.New(c.Interface, events)
+		} else {
+			network = discovery.WithDiagnostics(network, events)
 		}
 		if err == nil {
 			if c.Kind == "join" {
@@ -181,4 +210,60 @@ func list(out io.Writer, kind string, peers []wire.Peer) error {
 		}
 	}
 	return w.Flush()
+}
+
+// Diagnostic output is best effort, including status when stderr is blocked.
+// A single worker owns the underlying writer; network and leave never wait on it.
+type diagnosticWriter struct{ events chan<- discovery.Event }
+
+func (w diagnosticWriter) Write(b []byte) (int, error) {
+	select {
+	case w.events <- discovery.Event{Level: "status", Message: string(b)}:
+	default:
+	}
+	return len(b), nil
+}
+
+func startDiagnostics(out io.Writer, debug bool) (chan<- discovery.Event, func()) {
+	events := make(chan discovery.Event, 128)
+	stop, done := make(chan struct{}), make(chan struct{})
+	write := func(e discovery.Event) {
+		if e.Level == "status" {
+			_, _ = io.WriteString(out, e.Message)
+			return
+		}
+		if e.Level == "debug" && !debug {
+			return
+		}
+		_, _ = fmt.Fprintf(out, "lanlobby [%s]: %s\n", wire.SafeText(e.Level), wire.SafeText(e.Message))
+	}
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case e := <-events:
+				write(e)
+			case <-stop:
+				for {
+					select {
+					case e := <-events:
+						write(e)
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+	return events, func() {
+		close(stop)
+		// A blocked terminal must not hold discovery sockets or prevent leave.
+		// At most this one writer can remain blocked until the process exits.
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+		}
+	}
 }

@@ -1,4 +1,4 @@
-// Package integration drives the real binary. Opt in because mDNS requires an
+// Package integration drives the real binary. Opt in because UDP multicast requires an
 // actual multicast-capable LAN; ordinary go test ./... stays network-independent.
 package integration
 
