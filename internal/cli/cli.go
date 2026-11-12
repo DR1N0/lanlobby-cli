@@ -1,33 +1,36 @@
-// Package cli provides the text-only lanlobby commands.
+// Package cli parses and runs the lanlobby command set.
 package cli
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"sort"
-	"text/tabwriter"
-	"time"
+	"os"
+	"strings"
 
-	"github.com/DR1N0/lanlobby-cli/internal/discovery"
-	"github.com/DR1N0/lanlobby-cli/internal/session"
+	"github.com/DR1N0/lanlobby-cli/internal/room"
 	"github.com/DR1N0/lanlobby-cli/internal/version"
-	"github.com/DR1N0/lanlobby-cli/internal/wire"
 )
 
 const Usage = `Usage:
-  lanlobby join ROOM --as NAME [--interface IFACE] [--debug]
-  lanlobby send ROOM --as NAME "MESSAGE"
-  lanlobby list room [--interface IFACE] [--debug]
-  lanlobby list user --room=ROOM [--interface IFACE] [--debug]
+  lanlobby serve --room ROOM [--as NAME] [--listen ADDR] [--peer ADDR ...] [--advertise IP] [--debug]
+  lanlobby join ROOM [--as NAME] [--peer ADDR] [--json]
+  lanlobby say ROOM MESSAGE [--as NAME] [--peer ADDR]
+  lanlobby tail ROOM [--as NAME] [--peer ADDR] [--json]
+  lanlobby peers ROOM [--peer ADDR] [--json]
   lanlobby version [--short]
 
-join stays in the foreground and streams live messages to stdout.
-send requires a matching local join in another terminal. Ctrl-C leaves.
-LAN discovery uses UDP multicast; chat messages use direct TCP. No history.
---debug prints discovery and TCP verification diagnostics to stderr.
+serve runs a foreground room node and prints the join commands for this and
+other machines. join, say, tail and peers connect to a node: the local one by
+default (127.0.0.1:7717), or --peer host:port for a remote one.
+
+Nodes talk to each other only when started with --peer; there is no multicast
+discovery. Chat messages are relayed by the node and never stored.
+Ctrl-C leaves.
 `
 
 type Command struct {
@@ -35,88 +38,130 @@ type Command struct {
 	Room      string
 	User      string
 	Body      string
-	Interface string
-	Short     bool
+	Peers     []string
+	Listen    string
+	Advertise string
 	Debug     bool
+	JSON      bool
+	Short     bool
 }
 
+// Parse accepts flags in any position, collects positional arguments, and
+// validates the shape of each subcommand.
 func Parse(args []string) (Command, error) {
 	var c Command
-	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help")) {
+	if len(args) == 0 {
+		return c, flag.ErrHelp
+	}
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		return c, flag.ErrHelp
 	}
 	c.Kind = args[0]
-	f := flag.NewFlagSet("lanlobby "+c.Kind, flag.ContinueOnError)
-	f.SetOutput(io.Discard)
-	switch c.Kind {
-	case "version":
-		f.BoolVar(&c.Short, "short", false, "print only the version tag")
-		if err := f.Parse(args[1:]); err != nil {
-			return c, err
+	var pos []string
+
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "--") {
+			pos = append(pos, a)
+			continue
 		}
-		if f.NArg() != 0 {
-			return c, errors.New("unexpected version arguments")
+		name := strings.TrimPrefix(a, "--")
+		var val string
+		hasVal := false
+		if k := strings.IndexByte(name, '='); k >= 0 {
+			val, name, hasVal = name[k+1:], name[:k], true
 		}
-	case "join", "send":
-		if len(args) < 2 {
-			return c, errors.New("missing ROOM")
-		}
-		c.Room = args[1]
-		f.StringVar(&c.User, "as", "", "local member name")
-		if c.Kind == "join" {
-			f.StringVar(&c.Interface, "interface", "", "LAN interface")
-			f.BoolVar(&c.Debug, "debug", false, "discovery diagnostics on stderr")
-		}
-		if err := f.Parse(args[2:]); err != nil {
-			return c, err
-		}
-		if c.Kind == "send" {
-			if f.NArg() != 1 {
-				return c, errors.New("send requires one quoted MESSAGE after the flags")
+		next := func() (string, error) {
+			if hasVal {
+				return val, nil
 			}
-			c.Body = f.Arg(0)
-			if err := wire.Body(c.Body); err != nil {
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--%s requires a value", name)
+			}
+			i++
+			return args[i], nil
+		}
+		switch name {
+		case "as":
+			v, err := next()
+			if err != nil {
 				return c, err
 			}
-		} else if f.NArg() != 0 {
-			return c, errors.New("unexpected join arguments")
+			c.User = v
+		case "peer":
+			v, err := next()
+			if err != nil {
+				return c, err
+			}
+			c.Peers = append(c.Peers, v)
+		case "listen":
+			v, err := next()
+			if err != nil {
+				return c, err
+			}
+			c.Listen = v
+		case "room":
+			v, err := next()
+			if err != nil {
+				return c, err
+			}
+			c.Room = v
+		case "advertise":
+			v, err := next()
+			if err != nil {
+				return c, err
+			}
+			c.Advertise = v
+		case "debug":
+			c.Debug = true
+		case "json":
+			c.JSON = true
+		case "short":
+			c.Short = true
+		case "help", "h":
+			return c, flag.ErrHelp
+		default:
+			return c, fmt.Errorf("unknown flag --%s", name)
 		}
-		if err := wire.Identifier(c.User); err != nil {
-			return c, fmt.Errorf("--as: %w", err)
+	}
+
+	switch c.Kind {
+	case "version":
+		if len(pos) != 0 {
+			return c, errors.New("version takes no arguments")
 		}
-	case "list":
-		if len(args) < 2 || (args[1] != "room" && args[1] != "user") {
-			return c, errors.New("list requires room or user")
+	case "serve":
+		if c.Room == "" {
+			return c, errors.New("serve requires --room")
 		}
-		c.Kind = "list-" + args[1]
-		if c.Kind == "list-user" {
-			f.StringVar(&c.Room, "room", "", "room to list")
+		if len(pos) != 0 {
+			return c, errors.New("serve takes no positional arguments")
 		}
-		f.StringVar(&c.Interface, "interface", "", "LAN interface")
-		f.BoolVar(&c.Debug, "debug", false, "discovery diagnostics on stderr")
-		if err := f.Parse(args[2:]); err != nil {
-			return c, err
+	case "join", "tail":
+		if len(pos) != 1 {
+			return c, fmt.Errorf("%s requires ROOM", c.Kind)
 		}
-		if f.NArg() != 0 {
-			return c, errors.New("unexpected list arguments")
+		c.Room = pos[0]
+	case "say":
+		if len(pos) != 2 {
+			return c, errors.New(`say requires ROOM and one quoted MESSAGE: lanlobby say dev "hello"`)
 		}
+		c.Room, c.Body = pos[0], pos[1]
+	case "peers":
+		if len(pos) != 1 {
+			return c, errors.New("peers requires ROOM")
+		}
+		c.Room = pos[0]
 	default:
 		return c, fmt.Errorf("unknown command %q", c.Kind)
-	}
-	if c.Kind != "list-room" && c.Kind != "version" {
-		if err := wire.Identifier(c.Room); err != nil {
-			return c, fmt.Errorf("room: %w", err)
-		}
 	}
 	return c, nil
 }
 
 type Options struct {
-	Output          io.Writer
-	Diagnostics     io.Writer
-	Network         discovery.Network
-	RuntimeDir      string
-	DiscoveryWindow time.Duration
+	Output      io.Writer
+	Diagnostics io.Writer
+	Input       io.Reader
 }
 
 // Run returns conventional exit codes: 0 success, 1 runtime error, 2 usage error.
@@ -127,143 +172,276 @@ func Run(ctx context.Context, args []string, opts Options) int {
 	if opts.Diagnostics == nil {
 		opts.Diagnostics = io.Discard
 	}
+	if opts.Input == nil {
+		opts.Input = os.Stdin
+	}
 	c, err := Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		_, _ = io.WriteString(opts.Output, Usage)
 		return 0
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n\n%s", wire.SafeText(err.Error()), Usage)
+		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n\n%s", sanitizeText(err.Error()), Usage)
 		return 2
 	}
-	if c.Kind == "version" {
-		v := version.Get()
-		if c.Short {
-			_, err = fmt.Fprintln(opts.Output, wire.SafeText(v.GitVersion))
-		} else {
-			_, err = fmt.Fprintf(opts.Output, "lanlobby %s\nGitCommit: %s\nGitTreeState: %s\nBuildDate: %s\nGoVersion: %s\nPlatform: %s\n",
-				wire.SafeText(v.GitVersion), wire.SafeText(v.GitCommit), wire.SafeText(v.GitTreeState), wire.SafeText(v.BuildDate), v.GoVersion, v.Platform)
-		}
-	} else if c.Kind == "send" {
-		err = session.Send(ctx, opts.RuntimeDir, c.Room, c.User, c.Body)
-	} else {
-		network := opts.Network
-		// Status and discovery share one bounded, nonblocking stderr queue.
-		events, finish := startDiagnostics(opts.Diagnostics, c.Debug)
-		opts.Diagnostics = diagnosticWriter{events: events}
-		defer finish()
-		if network == nil {
-			network, err = discovery.New(c.Interface, events)
-		} else {
-			network = discovery.WithDiagnostics(network, events)
-		}
-		if err == nil {
-			if c.Kind == "join" {
-				err = session.Run(ctx, session.Options{Room: c.Room, User: c.User, Network: network, Output: opts.Output, Diagnostics: opts.Diagnostics, RuntimeDir: opts.RuntimeDir, DiscoveryWindow: opts.DiscoveryWindow})
-			} else {
-				var peers []wire.Peer
-				peers, err = discovery.Live(ctx, network, c.Room, opts.DiscoveryWindow)
-				if err == nil {
-					err = list(opts.Output, c.Kind, peers)
-				}
-			}
-		}
+	switch c.Kind {
+	case "version":
+		return runVersion(c, opts)
+	case "serve":
+		err = runServe(ctx, c, opts)
+	case "join":
+		err = runJoin(ctx, c, opts)
+	case "say":
+		err = runSay(ctx, c, opts)
+	case "tail":
+		err = runTail(ctx, c, opts)
+	case "peers":
+		err = runPeers(ctx, c, opts)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0
 		}
-		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n", wire.SafeText(err.Error()))
+		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n", sanitizeText(err.Error()))
 		return 1
 	}
 	return 0
 }
 
-func list(out io.Writer, kind string, peers []wire.Peer) error {
-	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if kind == "list-room" {
-		if _, err := fmt.Fprintln(w, "ROOM\tUSERS"); err != nil {
-			return err
-		}
-		counts := make(map[string]int)
-		for _, p := range peers {
-			counts[p.Room]++
-		}
-		rooms := make([]string, 0, len(counts))
-		for room := range counts {
-			rooms = append(rooms, room)
-		}
-		sort.Strings(rooms)
-		for _, room := range rooms {
-			if _, err := fmt.Fprintf(w, "%s\t%d\n", wire.SafeText(room), counts[room]); err != nil {
-				return err
+func runVersion(c Command, opts Options) int {
+	v := version.Get()
+	if c.Short {
+		_, _ = fmt.Fprintln(opts.Output, sanitizeText(v.GitVersion))
+		return 0
+	}
+	_, _ = fmt.Fprintf(opts.Output, "lanlobby %s\nGitCommit: %s\nGitTreeState: %s\nBuildDate: %s\nGoVersion: %s\nPlatform: %s\n",
+		sanitizeText(v.GitVersion), sanitizeText(v.GitCommit), sanitizeText(v.GitTreeState), sanitizeText(v.BuildDate), v.GoVersion, v.Platform)
+	return 0
+}
+
+func nameOrDefault(u string) string {
+	if s := room.SanitizeName(u); s != "" {
+		return s
+	}
+	return room.DefaultName()
+}
+
+func peerAddr(c Command) string {
+	if len(c.Peers) > 0 {
+		return c.Peers[0]
+	}
+	return "127.0.0.1:7717"
+}
+
+func runServe(ctx context.Context, c Command, opts Options) error {
+	name := nameOrDefault(c.User)
+	srv := &room.Server{
+		Room:        c.Room,
+		Name:        name,
+		Listen:      c.Listen,
+		Peers:       c.Peers,
+		Debug:       c.Debug,
+		Diagnostics: opts.Diagnostics,
+	}
+	srv.OnReady = func(addr string) {
+		host, port := splitHostPort(addr)
+		host = strings.Trim(host, "[]")
+		ip := c.Advertise
+		if ip == "" {
+			// A wildcard listen has no single address to advertise; use the
+			// first usable LAN address. A specific listen address speaks for
+			// itself (e.g. 127.0.0.1 for same-machine tests).
+			if host == "0.0.0.0" || host == "::" || host == "" {
+				ip = room.LocalIP()
+			} else {
+				ip = host
 			}
 		}
+		printServeBanner(opts.Output, c.Room, name, ip, port)
+	}
+	return srv.Run(ctx)
+}
+
+func printServeBanner(out io.Writer, roomName, name, ip, port string) {
+	_, _ = fmt.Fprintf(out, "lanlobby serve: room %q as %q\n", roomName, name)
+	if ip == "" {
+		_, _ = fmt.Fprintf(out, "  listening on port %s\n", port)
 	} else {
-		if _, err := fmt.Fprintln(w, "USER\tADDRESS"); err != nil {
-			return err
-		}
-		for _, p := range peers {
-			if _, err := fmt.Fprintf(w, "%s\t%s\n", wire.SafeText(p.User), discovery.Address(p)); err != nil {
-				return err
-			}
-		}
+		_, _ = fmt.Fprintf(out, "  listening %s:%s\n", ip, port)
 	}
-	return w.Flush()
+	if port == "7717" {
+		_, _ = fmt.Fprintf(out, "  from this machine:    lanlobby join %s --as alice\n", roomName)
+	} else {
+		_, _ = fmt.Fprintf(out, "  from this machine:    lanlobby join %s --as alice --peer 127.0.0.1:%s\n", roomName, port)
+	}
+	if ip != "" && !isLoopback(ip) {
+		_, _ = fmt.Fprintf(out, "  from another machine: lanlobby join %s --as alice --peer %s:%s\n", roomName, ip, port)
+		_, _ = fmt.Fprintf(out, "  add another node:     lanlobby serve --room %s --as <name> --peer %s:%s\n", roomName, ip, port)
+	}
+	_, _ = fmt.Fprintln(out)
 }
 
-// Diagnostic output is best effort, including status when stderr is blocked.
-// A single worker owns the underlying writer; network and leave never wait on it.
-type diagnosticWriter struct{ events chan<- discovery.Event }
-
-func (w diagnosticWriter) Write(b []byte) (int, error) {
-	select {
-	case w.events <- discovery.Event{Level: "status", Message: string(b)}:
-	default:
-	}
-	return len(b), nil
+func isLoopback(ip string) bool {
+	return strings.HasPrefix(ip, "127.") || ip == "::1"
 }
 
-func startDiagnostics(out io.Writer, debug bool) (chan<- discovery.Event, func()) {
-	events := make(chan discovery.Event, 128)
-	stop, done := make(chan struct{}), make(chan struct{})
-	write := func(e discovery.Event) {
-		if e.Level == "status" {
-			_, _ = io.WriteString(out, e.Message)
-			return
-		}
-		if e.Level == "debug" && !debug {
-			return
-		}
-		_, _ = fmt.Fprintf(out, "lanlobby [%s]: %s\n", wire.SafeText(e.Level), wire.SafeText(e.Message))
+func splitHostPort(addr string) (string, string) {
+	i := strings.LastIndexByte(addr, ':')
+	if i < 0 {
+		return addr, ""
 	}
+	return addr[:i], addr[i+1:]
+}
+
+func runJoin(ctx context.Context, c Command, opts Options) error {
+	addr := peerAddr(c)
+	client, err := room.Dial(ctx, addr, c.Room, c.User)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if !c.JSON {
+		_, _ = fmt.Fprintf(opts.Output, "joined %q as %q via %s; Ctrl-C to leave\n", client.Room, client.User, addr)
+	}
+
+	joinCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	go func() {
-		defer close(done)
-		for {
-			select {
-			case e := <-events:
-				write(e)
-			case <-stop:
-				for {
-					select {
-					case e := <-events:
-						write(e)
-					default:
-						return
-					}
-				}
+		defer cancel()
+		sc := bufio.NewScanner(opts.Input)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			if _, err := client.Send(line); err != nil {
+				return
+			}
+			if !c.JSON {
+				_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(client.User), sanitizeText(line))
 			}
 		}
 	}()
-	return events, func() {
-		close(stop)
-		// A blocked terminal must not hold discovery sockets or prevent leave.
-		// At most this one writer can remain blocked until the process exits.
-		timer := time.NewTimer(100 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-done:
-		case <-timer.C:
+
+	err = client.Receive(joinCtx, func(f room.Frame) {
+		if c.JSON {
+			_, _ = fmt.Fprintln(opts.Output, frameJSON(f))
+			return
+		}
+		switch f.Type {
+		case room.TypeMessage:
+			_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(f.User), sanitizeText(f.Body))
+		case room.TypeNotice:
+			_, _ = fmt.Fprintf(opts.Output, "* %s\n", sanitizeText(f.Body))
+		}
+	})
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
+
+func runTail(ctx context.Context, c Command, opts Options) error {
+	addr := peerAddr(c)
+	client, err := room.Dial(ctx, addr, c.Room, c.User)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if !c.JSON {
+		_, _ = fmt.Fprintf(opts.Output, "tailing %q via %s as %q\n", c.Room, addr, client.User)
+	}
+	return client.Receive(ctx, func(f room.Frame) {
+		if c.JSON {
+			_, _ = fmt.Fprintln(opts.Output, frameJSON(f))
+			return
+		}
+		switch f.Type {
+		case room.TypeMessage:
+			_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(f.User), sanitizeText(f.Body))
+		case room.TypeNotice:
+			_, _ = fmt.Fprintf(opts.Output, "* %s\n", sanitizeText(f.Body))
+		}
+	})
+}
+
+func runSay(ctx context.Context, c Command, opts Options) error {
+	addr := peerAddr(c)
+	client, err := room.Dial(ctx, addr, c.Room, c.User)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	seq, err := client.Send(c.Body)
+	if err != nil {
+		return err
+	}
+	if err := client.WaitAck(seq, room.RequestTimeout); err != nil {
+		return fmt.Errorf("message not acknowledged: %w", err)
+	}
+	if !c.JSON {
+		_, _ = fmt.Fprintf(opts.Output, "sent as %q to %s\n", client.User, addr)
+	}
+	return nil
+}
+
+func runPeers(ctx context.Context, c Command, opts Options) error {
+	addr := peerAddr(c)
+	client, err := room.Dial(ctx, addr, c.Room, "")
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	members, err := client.Members()
+	if err != nil {
+		return err
+	}
+	if c.JSON {
+		enc := json.NewEncoder(opts.Output)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(map[string]any{"room": c.Room, "members": members})
+	}
+	_, _ = fmt.Fprintf(opts.Output, "ROOM  %s\n", c.Room)
+	_, _ = fmt.Fprintf(opts.Output, "USER\tROLE\tSESSION\n")
+	for _, m := range members {
+		role := "client"
+		if m.Peer {
+			role = "node"
+		}
+		_, _ = fmt.Fprintf(opts.Output, "%s\t%s\t%s\n", sanitizeText(m.User), role, m.Session)
+	}
+	return nil
+}
+
+func frameJSON(f room.Frame) string {
+	b, _ := json.Marshal(map[string]any{
+		"type":    f.Type,
+		"room":    f.Room,
+		"user":    f.User,
+		"origin":  f.Origin,
+		"seq":     f.Seq,
+		"body":    f.Body,
+		"members": f.Members,
+	})
+	return string(b)
+}
+
+// sanitizeText keeps errors and user text from injecting terminal controls.
+func sanitizeText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
 		}
 	}
+	return b.String()
 }
