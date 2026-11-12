@@ -36,7 +36,7 @@ func DialEphemeral(ctx context.Context, addr, room, user string) (*Client, error
 
 func dial(ctx context.Context, addr, room, user string, ephemeral bool) (*Client, error) {
 	d := net.Dialer{Timeout: DialTimeout}
-	nc, err := d.DialContext(ctx, "tcp", addr)
+	nc, err := d.DialContext(ctx, "tcp4", addr)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", addr, err)
 	}

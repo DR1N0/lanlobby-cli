@@ -69,7 +69,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if addr == "" {
 		addr = "0.0.0.0:7717"
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
