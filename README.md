@@ -120,6 +120,30 @@ lanlobby serve --room dev --as win --listen 0.0.0.0:7717 --peer 192.168.1.6:7717
 
 Nodes reconnect automatically when a peer restarts. A second node is optional: run `serve` on one machine and `join ... --peer` from the other.
 
+### When a machine cannot accept inbound connections
+
+A managed Mac (or any host whose firewall cannot be changed) cannot be dialed.
+It can still take part: run its node on loopback and dial out to the reachable
+machine. Clients on it talk to the local node over loopback, so no inbound
+permission is needed.
+
+```bash
+# Reachable machine (e.g. Windows) is the node
+lanlobby serve --room dev --as win --listen 0.0.0.0:7717
+
+# Firewalled machine (e.g. a managed Mac): loopback only, dial out
+lanlobby serve --room dev --as mac --listen 127.0.0.1:7717 --peer 192.168.1.7:7717
+
+# On the Mac, clients use its local node
+lanlobby join dev --as alice
+lanlobby say dev "hello" --as bob
+```
+
+`join`, `say` and `peers` always default to `127.0.0.1:7717`. A machine that
+runs no local node must pass `--peer <node-ip>:7717` on **every** client
+invocation; a node that is only dialing out should listen on `127.0.0.1` so it
+does not advertise an address that its firewall will drop.
+
 ### Names
 
 `--as` is optional. Without it the node assigns a unique `<host>-<n>` name to each client and reports it. Give agents and humans distinct names when several sessions share a machine; two live sessions in one room may not share a name.
@@ -160,7 +184,7 @@ While joined, there is a bounded in-memory queue for immediate display. The CLI 
 ## Network and trust boundary
 
 - **Transport:** plain IPv4 TCP. Clients dial the node's listen address; peer nodes dial each other. Nothing is sent over UDP, so multicast, broadcast, IGMP, and AP-isolation behaviour cannot block the room.
-- **Firewalls:** each node must accept inbound TCP on its port from the other machines. Prefer a program-specific inbound rule (see Firewalls) over disabling the firewall. Clients only need outbound TCP.
+- **Firewalls:** each node must accept inbound TCP on its port from the other machines. Prefer a program-specific inbound rule (see Firewalls) over disabling the firewall. Clients only need outbound TCP. Managed macOS hosts cannot change the application firewall from the command line ("Firewall settings cannot be modified from command line on managed Mac computers"); such a host cannot be a dialed node, but it can run a loopback node and dial out (see "When a machine cannot accept inbound connections").
 - **Reachability direction:** a TCP connection carries both directions once established, so a one-way LAN restriction only requires choosing which side dials the other.
 - No internet service is used at runtime.
 - **Trusted LAN only: no encryption, passwords, cryptographic identities, or authenticated room membership.** Room names, usernames, and messages travel in plaintext. Anyone with network access can read or forge traffic; room names are not secrets.
