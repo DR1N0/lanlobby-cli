@@ -18,7 +18,7 @@ import (
 )
 
 const Usage = `Usage:
-  lanlobby serve --room ROOM [--as NAME] [--listen ADDR] [--peer ADDR ...] [--advertise IP] [--debug]
+  lanlobby serve ROOM [--as NAME] [--listen ADDR] [--peer ADDR ...] [--advertise IP] [--debug]
   lanlobby join ROOM [--as NAME] [--peer ADDR] [--read-only] [--json]
   lanlobby say ROOM MESSAGE [--as NAME] [--peer ADDR]
   lanlobby peers ROOM [--peer ADDR] [--json]
@@ -136,11 +136,16 @@ func Parse(args []string) (Command, error) {
 			return c, errors.New("version takes no arguments")
 		}
 	case "serve":
-		if c.Room == "" {
-			return c, errors.New("serve requires --room")
+		switch len(pos) {
+		case 0:
+			// --room already parsed
+		case 1:
+			c.Room = pos[0]
+		default:
+			return c, errors.New("serve takes at most one ROOM argument")
 		}
-		if len(pos) != 0 {
-			return c, errors.New("serve takes no positional arguments")
+		if c.Room == "" {
+			return c, errors.New("serve requires ROOM (positional or --room)")
 		}
 	case "join":
 		if len(pos) != 1 {
@@ -303,7 +308,7 @@ func printServeBanner(out io.Writer, roomName, name, ip, port string) {
 	}
 	if ip != "" && !isLoopback(ip) {
 		_, _ = fmt.Fprintf(out, "  from another machine: lanlobby join %s --as alice --peer %s:%s\n", roomName, ip, port)
-		_, _ = fmt.Fprintf(out, "  add another node:     lanlobby serve --room %s --as <name> --peer %s:%s\n", roomName, ip, port)
+		_, _ = fmt.Fprintf(out, "  add another node:     lanlobby serve %s --as <name> --peer %s:%s\n", roomName, ip, port)
 	}
 	_, _ = fmt.Fprintln(out)
 }

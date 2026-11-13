@@ -70,7 +70,7 @@ A plain `go build`/`go install` uses the source default version and reports unin
 Every machine that takes part runs one foreground node:
 
 ```bash
-lanlobby serve --room dev --as mac --listen 0.0.0.0:7717
+lanlobby serve dev --as mac --listen 0.0.0.0:7717
 ```
 
 It prints how to join from this machine and from others:
@@ -80,7 +80,7 @@ lanlobby serve: room "dev" as "mac"
   listening 192.168.1.6:7717
   from this machine:    lanlobby join dev --as alice
   from another machine: lanlobby join dev --as alice --peer 192.168.1.6:7717
-  add another node:     lanlobby serve --room dev --as <name> --peer 192.168.1.6:7717
+  add another node:     lanlobby serve dev --as <name> --peer 192.168.1.6:7717
 ```
 
 `--listen 0.0.0.0:7717` is the default. A node holds the room, relays messages between its clients and peer nodes, and keeps no history.
@@ -113,9 +113,9 @@ Start a node on each machine and point one at the other:
 
 ```bash
 # machine A
-lanlobby serve --room dev --as mac --listen 0.0.0.0:7717
+lanlobby serve dev --as mac --listen 0.0.0.0:7717
 # machine B
-lanlobby serve --room dev --as win --listen 0.0.0.0:7717 --peer 192.168.1.6:7717
+lanlobby serve dev --as win --listen 0.0.0.0:7717 --peer 192.168.1.6:7717
 ```
 
 Nodes reconnect automatically when a peer restarts. A second node is optional: run `serve` on one machine and `join ... --peer` from the other.
@@ -129,10 +129,10 @@ permission is needed.
 
 ```bash
 # Reachable machine (e.g. Windows) is the node
-lanlobby serve --room dev --as win --listen 0.0.0.0:7717
+lanlobby serve dev --as win --listen 0.0.0.0:7717
 
 # Firewalled machine (e.g. a managed Mac): loopback only, dial out
-lanlobby serve --room dev --as mac --listen 127.0.0.1:7717 --peer 192.168.1.7:7717
+lanlobby serve dev --as mac --listen 127.0.0.1:7717 --peer 192.168.1.7:7717
 
 # On the Mac, clients use its local node
 lanlobby join dev --as alice
@@ -204,7 +204,7 @@ The unit tests start real nodes on loopback and cover two-client relay, cross-no
 ### Two-machine smoke test
 
 1. `make build` (or `go build`) and copy the artifact to both machines.
-2. On A: `lanlobby serve --room dev --as mac --listen 0.0.0.0:7717`. On B: `lanlobby serve --room dev --as win --listen 0.0.0.0:7717 --peer <A-ip>:7717`.
+2. On A: `lanlobby serve dev --as mac --listen 0.0.0.0:7717`. On B: `lanlobby serve dev --as win --listen 0.0.0.0:7717 --peer <A-ip>:7717`.
 3. Allow the program through each firewall (see Firewalls). `lanlobby peers dev` on either side should list the other node.
 4. `lanlobby join dev --as alice` on A and `lanlobby say dev "hello" --as bob` on B: the message must appear on A. Repeat in the other direction.
 5. `lanlobby join dev --read-only --json` should produce one JSON object per line with `user`, `body`, and `seq`.
