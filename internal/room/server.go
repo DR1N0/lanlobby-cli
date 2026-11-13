@@ -135,6 +135,21 @@ func (s *Server) logf(format string, args ...any) {
 	fmt.Fprintf(s.Diagnostics, "lanlobby [debug]: "+format+"\n", args...)
 }
 
+// infof and warnf are always visible: peer state is operational, not debug.
+func (s *Server) infof(format string, args ...any) {
+	if s.Diagnostics == nil {
+		return
+	}
+	fmt.Fprintf(s.Diagnostics, "lanlobby: "+format+"\n", args...)
+}
+
+func (s *Server) warnf(format string, args ...any) {
+	if s.Diagnostics == nil {
+		return
+	}
+	fmt.Fprintf(s.Diagnostics, "lanlobby: warning: "+format+"\n", args...)
+}
+
 func (s *Server) acceptLoop() {
 	for {
 		nc, err := s.ln.Accept()
@@ -159,6 +174,7 @@ func (s *Server) acceptLoop() {
 
 // keepPeer maintains an outbound node connection, reconnecting forever.
 func (s *Server) keepPeer(addr string) {
+	lastErr := ""
 	for {
 		select {
 		case <-s.done:
@@ -168,9 +184,17 @@ func (s *Server) keepPeer(addr string) {
 		nc, err := net.DialTimeout("tcp", addr, DialTimeout)
 		if err == nil {
 			err = s.handle(nc, true)
+			if err == nil {
+				err = errors.New("connection closed")
+			}
 		}
 		if err != nil {
-			s.logf("peer %s: %v", addr, err)
+			// Report state changes only; a flapping or unreachable peer must
+			// not print a line every two seconds.
+			if err.Error() != lastErr {
+				s.warnf("peer %s: %v", addr, err)
+				lastErr = err.Error()
+			}
 		}
 		select {
 		case <-s.done:
@@ -213,12 +237,14 @@ func (s *Server) handle(nc net.Conn, outbound bool) error {
 			c.user = SanitizeName(f.Session)
 		}
 		c.session = f.Session
+		s.infof("peer %s connected as %q", addrOf(nc), c.user)
 	} else {
 		hello, err := c.dec.Read()
 		if err != nil {
 			return fmt.Errorf("handshake: %w", err)
 		}
 		if err := s.welcome(c, hello); err != nil {
+			s.warnf("connection %s rejected: %v", addrOf(nc), err)
 			_ = c.send(Frame{Type: TypeError, Error: err.Error()})
 			return err
 		}
@@ -520,6 +546,13 @@ func (s *Server) pingLoop() {
 }
 
 // hostName returns the short host name used for default member names.
+func addrOf(nc net.Conn) string {
+	if a := nc.RemoteAddr(); a != nil {
+		return a.String()
+	}
+	return "?"
+}
+
 func hostName() string {
 	h, err := hostname()
 	if err != nil || h == "" {
