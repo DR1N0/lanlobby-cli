@@ -27,7 +27,6 @@ func TestParseCommands(t *testing.T) {
 		{[]string{"join", "dev", "--read-only", "--json"}, Command{Kind: "join", Room: "dev", ReadOnly: true, JSON: true}},
 		{[]string{"peers", "dev", "--peer", "x:1"}, Command{Kind: "peers", Room: "dev", Peers: []string{"x:1"}}},
 		{[]string{"version", "--short"}, Command{Kind: "version", Short: true}},
-		{[]string{"serve", "--room=dev"}, Command{Kind: "serve", Room: "dev"}},
 		{[]string{"serve", "dev", "--peer", "a:1", "--peer", "b:2"}, Command{Kind: "serve", Room: "dev", Peers: []string{"a:1", "b:2"}}},
 	}
 	for _, tc := range cases {
@@ -45,7 +44,7 @@ func TestParseCommands(t *testing.T) {
 func TestParseRejects(t *testing.T) {
 	for _, args := range [][]string{
 		{"serve"},
-		{"serve", "--room"},
+		{"serve", "--room", "dev"},
 		{"serve", "a", "b"},
 		{"join"},
 		{"join", "a", "b"},

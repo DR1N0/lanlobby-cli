@@ -103,12 +103,6 @@ func Parse(args []string) (Command, error) {
 				return c, err
 			}
 			c.Listen = v
-		case "room":
-			v, err := next()
-			if err != nil {
-				return c, err
-			}
-			c.Room = v
 		case "advertise":
 			v, err := next()
 			if err != nil {
@@ -136,17 +130,10 @@ func Parse(args []string) (Command, error) {
 			return c, errors.New("version takes no arguments")
 		}
 	case "serve":
-		switch len(pos) {
-		case 0:
-			// --room already parsed
-		case 1:
-			c.Room = pos[0]
-		default:
-			return c, errors.New("serve takes at most one ROOM argument")
+		if len(pos) != 1 {
+			return c, errors.New("serve requires ROOM")
 		}
-		if c.Room == "" {
-			return c, errors.New("serve requires ROOM (positional or --room)")
-		}
+		c.Room = pos[0]
 	case "join":
 		if len(pos) != 1 {
 			return c, errors.New("join requires ROOM")
