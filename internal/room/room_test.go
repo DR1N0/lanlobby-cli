@@ -171,3 +171,30 @@ loop:
 		t.Fatalf("expected one message, got %d", messages)
 	}
 }
+
+func TestEphemeralMayShareName(t *testing.T) {
+	addr := startServer(t, &Server{Room: "dev", Name: "node"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	watcher, err := Dial(ctx, addr, "dev", "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+
+	// say uses the same --as as the watcher; it must be accepted.
+	sender, err := DialEphemeral(ctx, addr, "dev", "same")
+	if err != nil {
+		t.Fatalf("ephemeral sender with the member's name was rejected: %v", err)
+	}
+	defer sender.Close()
+	if _, err := sender.Send("hi"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two persistent joins still cannot share a name.
+	if _, err := Dial(ctx, addr, "dev", "same"); err == nil {
+		t.Fatal("a second persistent join with the same name was accepted")
+	}
+}

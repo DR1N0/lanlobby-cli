@@ -291,9 +291,14 @@ func (s *Server) welcome(c *conn, hello Frame) error {
 			c.user = s.newNameLocked(hello.Host)
 		} else {
 			c.user = SanitizeName(hello.User)
-			for _, m := range s.members {
-				if m.User == c.user {
-					return fmt.Errorf("name %q is already in this room; choose another --as", c.user)
+			// A one-shot sender (say) may reuse a live member's name: it never
+			// shows a join/leave, and watchers filter it by name with
+			// --no-self. Two persistent joins still may not share a name.
+			if !c.ephemeral {
+				for _, m := range s.members {
+					if m.User == c.user {
+						return fmt.Errorf("name %q is already in this room; choose another --as", c.user)
+					}
 				}
 			}
 		}
