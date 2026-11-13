@@ -220,3 +220,7 @@ The unit tests start real nodes on loopback and cover two-client relay, cross-no
 4. `lanlobby join dev --as alice` on A and `lanlobby say dev "hello" --as bob` on B: the message must appear on A. Repeat in the other direction.
 5. `lanlobby join dev --read-only --json` should produce one JSON object per line with `user`, `body`, and `seq`.
 6. Restart A's node; B should reconnect within a few seconds. Restart `join` after its node restarts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
