@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -60,6 +61,21 @@ func Parse(args []string) (Command, error) {
 		return c, flag.ErrHelp
 	}
 	c.Kind = args[0]
+	allowed := map[string]bool{}
+	switch c.Kind {
+	case "serve":
+		allowed = map[string]bool{"as": true, "peer": true, "listen": true, "advertise": true, "debug": true}
+	case "join":
+		allowed = map[string]bool{"as": true, "peer": true, "read-only": true, "json": true}
+	case "say":
+		allowed = map[string]bool{"as": true, "peer": true}
+	case "peers":
+		allowed = map[string]bool{"peer": true, "json": true}
+	case "version":
+		allowed = map[string]bool{"short": true, "json": true}
+	default:
+		return c, fmt.Errorf("unknown command %q", c.Kind)
+	}
 	var pos []string
 
 	for i := 1; i < len(args); i++ {
@@ -83,6 +99,9 @@ func Parse(args []string) (Command, error) {
 			}
 			i++
 			return args[i], nil
+		}
+		if !allowed[name] {
+			return c, fmt.Errorf("--%s is not valid for %s", name, c.Kind)
 		}
 		switch name {
 		case "as":
@@ -149,8 +168,9 @@ func Parse(args []string) (Command, error) {
 			return c, errors.New("peers requires ROOM")
 		}
 		c.Room = pos[0]
-	default:
-		return c, fmt.Errorf("unknown command %q", c.Kind)
+	}
+	if c.Kind != "serve" && len(c.Peers) > 1 {
+		return c, fmt.Errorf("%s accepts only one --peer", c.Kind)
 	}
 	return c, nil
 }
@@ -178,7 +198,7 @@ func Run(ctx context.Context, args []string, opts Options) int {
 		return 0
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n\n%s", sanitizeText(err.Error()), Usage)
+		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n\n%s", room.SafeText(err.Error()), Usage)
 		return 2
 	}
 	switch c.Kind {
@@ -197,7 +217,7 @@ func Run(ctx context.Context, args []string, opts Options) int {
 		if ctx.Err() != nil {
 			return 0
 		}
-		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n", sanitizeText(err.Error()))
+		_, _ = fmt.Fprintf(opts.Diagnostics, "lanlobby: %s\n", room.SafeText(err.Error()))
 		return 1
 	}
 	return 0
@@ -206,7 +226,7 @@ func Run(ctx context.Context, args []string, opts Options) int {
 func runVersion(c Command, opts Options) int {
 	v := version.Get()
 	if c.Short {
-		_, _ = fmt.Fprintln(opts.Output, sanitizeText(v.GitVersion))
+		_, _ = fmt.Fprintln(opts.Output, room.SafeText(v.GitVersion))
 		return 0
 	}
 	if c.JSON {
@@ -231,7 +251,7 @@ func runVersion(c Command, opts Options) int {
 		{"  go", v.GoVersion},
 		{"  platform", v.Platform},
 	} {
-		_, _ = fmt.Fprintf(w, "%s\t%s\n", row[0], sanitizeText(row[1]))
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", row[0], room.SafeText(row[1]))
 	}
 	_ = w.Flush()
 	return 0
@@ -244,11 +264,15 @@ func nameOrDefault(u string) string {
 	return room.DefaultName()
 }
 
-func peerAddr(c Command) string {
-	if len(c.Peers) > 0 {
-		return c.Peers[0]
+func peerAddr(c Command) (string, error) {
+	addr := "127.0.0.1:7717"
+	if len(c.Peers) == 1 {
+		addr = c.Peers[0]
 	}
-	return "127.0.0.1:7717"
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return "", fmt.Errorf("invalid --peer %q: %w", addr, err)
+	}
+	return addr, nil
 }
 
 func runServe(ctx context.Context, c Command, opts Options) error {
@@ -313,7 +337,10 @@ func splitHostPort(addr string) (string, string) {
 }
 
 func runJoin(ctx context.Context, c Command, opts Options) error {
-	addr := peerAddr(c)
+	addr, err := peerAddr(c)
+	if err != nil {
+		return err
+	}
 	client, err := room.Dial(ctx, addr, c.Room, c.User)
 	if err != nil {
 		return err
@@ -338,7 +365,7 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 					return
 				}
 				if !c.JSON {
-					_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(client.User), sanitizeText(line))
+					_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", room.SafeText(client.User), room.SafeText(line))
 				}
 			}
 		}()
@@ -351,9 +378,9 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 		}
 		switch f.Type {
 		case room.TypeMessage:
-			_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", sanitizeText(f.User), sanitizeText(f.Body))
+			_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", room.SafeText(f.User), room.SafeText(f.Body))
 		case room.TypeNotice:
-			_, _ = fmt.Fprintf(opts.Output, "* %s\n", sanitizeText(f.Body))
+			_, _ = fmt.Fprintf(opts.Output, "* %s\n", room.SafeText(f.Body))
 		}
 	})
 	if ctx.Err() != nil {
@@ -363,7 +390,10 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 }
 
 func runSay(ctx context.Context, c Command, opts Options) error {
-	addr := peerAddr(c)
+	addr, err := peerAddr(c)
+	if err != nil {
+		return err
+	}
 	client, err := room.DialEphemeral(ctx, addr, c.Room, c.User)
 	if err != nil {
 		return err
@@ -383,7 +413,10 @@ func runSay(ctx context.Context, c Command, opts Options) error {
 }
 
 func runPeers(ctx context.Context, c Command, opts Options) error {
-	addr := peerAddr(c)
+	addr, err := peerAddr(c)
+	if err != nil {
+		return err
+	}
 	client, err := room.Dial(ctx, addr, c.Room, "")
 	if err != nil {
 		return err
@@ -405,40 +438,28 @@ func runPeers(ctx context.Context, c Command, opts Options) error {
 		if m.Peer {
 			role = "node"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", sanitizeText(m.User), role, m.Session)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", room.SafeText(m.User), role, m.Session)
 	}
 	return w.Flush()
 }
 
-func frameJSON(f room.Frame) string {
-	b, _ := json.Marshal(map[string]any{
-		"type":    f.Type,
-		"room":    f.Room,
-		"user":    f.User,
-		"origin":  f.Origin,
-		"seq":     f.Seq,
-		"body":    f.Body,
-		"members": f.Members,
-	})
-	return string(b)
+type jsonFrame struct {
+	Type   string `json:"type"`
+	Room   string `json:"room,omitempty"`
+	User   string `json:"user,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	Seq    int64  `json:"seq,omitempty"`
+	Body   string `json:"body,omitempty"`
 }
 
-// sanitizeText keeps errors and user text from injecting terminal controls.
-func sanitizeText(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\n':
-			b.WriteString(`\n`)
-		case r == '\r':
-			b.WriteString(`\r`)
-		case r == '\t':
-			b.WriteString(`\t`)
-		case r < 0x20 || r == 0x7f:
-			fmt.Fprintf(&b, `\u%04x`, r)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+func frameJSON(f room.Frame) string {
+	b, _ := json.Marshal(jsonFrame{
+		Type:   f.Type,
+		Room:   f.Room,
+		User:   f.User,
+		Origin: f.Origin,
+		Seq:    f.Seq,
+		Body:   f.Body,
+	})
+	return string(b)
 }

@@ -11,8 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/DR1N0/lanlobby-cli/internal/wire"
 )
 
 // Server is one foreground room node: it accepts peer nodes and local/remote
@@ -54,7 +52,7 @@ type conn struct {
 	srv       *Server
 	nc        net.Conn
 	enc       *bufio.Writer
-	dec       *Reader
+	dec       *reader
 	mu        sync.Mutex
 	role      string
 	user      string
@@ -85,7 +83,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.conns = make(map[*conn]struct{})
 	s.members = make(map[string]*Member)
 	s.seen = make(map[signal]struct{})
-	s.id, _ = wire.NewID()
+	s.id, _ = newID()
 
 	for _, p := range s.Peers {
 		p := p
@@ -187,7 +185,7 @@ func (s *Server) handle(nc net.Conn, outbound bool) error {
 		srv:    s,
 		nc:     nc,
 		enc:    bufio.NewWriter(nc),
-		dec:    NewReader(nc),
+		dec:    newReader(nc),
 		closed: make(chan struct{}),
 	}
 	c.lastSeen.Store(time.Now().UnixNano())
@@ -274,7 +272,7 @@ func (s *Server) welcome(c *conn, hello Frame) error {
 			}
 		}
 	}
-	id, err := wire.NewID()
+	id, err := newID()
 	if err != nil {
 		return err
 	}
@@ -345,7 +343,7 @@ func (s *Server) unregister(c *conn) {
 func (c *conn) send(f Frame) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := Write(c.enc, f); err != nil {
+	if err := writeFrame(c.enc, f); err != nil {
 		return err
 	}
 	return c.enc.Flush()
@@ -391,7 +389,7 @@ func (c *conn) handleFrame(f Frame) error {
 		if len(f.Body) == 0 || len(f.Body) > MaxBody {
 			return nil
 		}
-		if err := wire.Body(f.Body); err != nil {
+		if err := validateBody(f.Body); err != nil {
 			return nil
 		}
 		if c.role == RoleClient {
@@ -412,7 +410,7 @@ func (c *conn) handleFrame(f Frame) error {
 			return nil
 		}
 		if s.Output != nil {
-			_, _ = fmt.Fprintf(s.Output, "%s: %s\n", wire.SafeText(f.User), wire.SafeText(f.Body))
+			_, _ = fmt.Fprintf(s.Output, "%s: %s\n", SafeText(f.User), SafeText(f.Body))
 		}
 		s.broadcast(c, Frame{Type: TypeMessage, User: f.User, Origin: f.Origin, Seq: f.Seq, Body: f.Body})
 		if c.role == RoleClient {

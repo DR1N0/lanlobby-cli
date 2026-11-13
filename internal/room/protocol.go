@@ -13,8 +13,6 @@ import (
 	"io"
 	"time"
 	"unicode/utf8"
-
-	"github.com/DR1N0/lanlobby-cli/internal/wire"
 )
 
 const (
@@ -95,9 +93,6 @@ func SanitizeName(s string) string {
 	return s
 }
 
-// ValidateName applies the shared identifier rules to a room or user name.
-func ValidateName(s string) error { return wire.Identifier(s) }
-
 func (f Frame) Validate() error {
 	if f.Version != Version {
 		return errors.New("unsupported protocol version")
@@ -111,17 +106,17 @@ func (f Frame) Validate() error {
 // Reader is a persistent frame reader. One buffer per connection is required:
 // creating a fresh bufio.Reader per frame would silently discard bytes that
 // arrived in the same TCP segment.
-type Reader struct {
+type reader struct {
 	r *bufio.Reader
 }
 
-func NewReader(r io.Reader) *Reader {
-	return &Reader{r: bufio.NewReaderSize(r, MaxFrame)}
+func newReader(r io.Reader) *reader {
+	return &reader{r: bufio.NewReaderSize(r, MaxFrame)}
 }
 
 // Read reads a single frame. The buffer is bounded, and oversized or
 // truncated input is rejected rather than silently accepted.
-func (rd *Reader) Read() (Frame, error) {
+func (rd *reader) Read() (Frame, error) {
 	var f Frame
 	b, err := rd.r.ReadBytes('\n')
 	if len(b) > MaxFrame {
@@ -145,7 +140,7 @@ func (rd *Reader) Read() (Frame, error) {
 }
 
 // Write writes a single newline-terminated frame.
-func Write(w io.Writer, f Frame) error {
+func writeFrame(w io.Writer, f Frame) error {
 	f.Version = Version
 	b, err := json.Marshal(f)
 	if err != nil {

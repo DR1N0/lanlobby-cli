@@ -8,7 +8,7 @@ NC := \033[0m
 CLITARGET := lanlobby
 GO ?= go
 LDFLAGS ?= -s -w
-BUILD_TAG ?= v0.0.1
+BUILD_TAG ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 export BUILD_TAG
 
 ##@ General

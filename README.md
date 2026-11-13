@@ -44,24 +44,35 @@ Alternatively, `go install ./cmd/lanlobby` installs into `GOBIN`, or `$(go env G
 ```bash
 lanlobby version
 # lanlobby   v0.0.1
-#   commit   unknown
-#   state    unknown
-#   built    unknown
-#   go       go1.27.3
-#   platform windows/amd64
+#   commit   2f31c9e3a1b2c3d4e5f60718293a4b5c6d7e8f90
+#   state    clean
+#   built    2026-11-13T11:06:12Z
+#   go       go1.26.0
+#   platform darwin/arm64
 
 lanlobby version --short
 # v0.0.1
 
 lanlobby version --json
-# {"built":"unknown","commit":"unknown","go":"go1.27.3","platform":"windows/amd64","state":"unknown","version":"v0.0.1"}
+# {"built":"2026-11-13T11:06:12Z","commit":"2f31c9e…","go":"go1.26.0","platform":"darwin/arm64","state":"clean","version":"v0.0.1"}
 ```
 
-`make build` runs `hack/generate-ldflags.sh` and injects the version tag, Git commit, worktree state, and UTC build date with Go `-ldflags -X`. The full command also prints the Go version and target platform. It is local-only: no LAN discovery or update-server requests.
+The version comes from git tags: `hack/generate-ldflags.sh` runs
+`git describe --tags --always` and injects the version, commit, worktree state
+(`clean`/`dirty`), and UTC build date with Go `-ldflags -X`. Tag a release and
+rebuild:
 
-The initial `BUILD_TAG` is `v0.0.1`. Override it for later builds with `make build BUILD_TAG=v0.0.2` or `BUILD_TAG=v0.0.2 make build`. All three artifacts in one build share the same metadata. This embeds a version; it does not create Git tags or publish a release.
+```bash
+git tag -a v0.0.1 -m v0.0.1
+make build
+```
 
-A plain `go build`/`go install` uses the source default version and reports uninjected commit/state/build-date fields as `unknown`.
+With no tag the version is the short commit hash (`b4ef412`); without git at
+all it is `dev`. Override a single build with `BUILD_TAG=v0.0.2 make build` or
+`make build BUILD_TAG=v0.0.2`. All three artifacts share the metadata. This
+embeds a version; it does not create tags or publish a release. A plain
+`go build`/`go install` uses the source default `dev` and reports
+commit/state/build-date as `unknown`.
 
 ## Usage
 

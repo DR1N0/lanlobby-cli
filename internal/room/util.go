@@ -4,8 +4,6 @@ import (
 	"net"
 	"os"
 	"strings"
-
-	"github.com/DR1N0/lanlobby-cli/internal/wire"
 )
 
 func hostname() (string, error) { return os.Hostname() }
@@ -24,9 +22,6 @@ func DefaultName() string {
 	}
 	return "guest"
 }
-
-// wireBody applies the shared message body limits.
-func wireBody(s string) error { return wire.Body(s) }
 
 // LocalIP returns a plausible LAN address to advertise, preferring private
 // IPv4 addresses over other routable ones.

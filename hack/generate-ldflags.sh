@@ -2,7 +2,15 @@
 # BUILD_TAG may be supplied by CI, for example BUILD_TAG=v0.0.1 make build.
 set -eu
 
-BUILD_TAG=${BUILD_TAG:-v0.0.1}
+ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+# Version comes from git tags when BUILD_TAG is not set explicitly.
+if [ -z "${BUILD_TAG:-}" ]; then
+    if BUILD_TAG=$(git -C "$ROOT" describe --tags --always 2>/dev/null); then
+        :
+    else
+        BUILD_TAG=dev
+    fi
+fi
 # Keep every -X value a single linker argument, even when supplied by CI.
 case "$BUILD_TAG" in
     *[!A-Za-z0-9._+-]*)
@@ -11,12 +19,11 @@ case "$BUILD_TAG" in
         ;;
 esac
 
-ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 GitCommit=unknown
 GitTreeState=unknown
 if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
     GitCommit=$(git -C "$ROOT" rev-parse HEAD)
-    if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
+    if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]; then
         GitTreeState=dirty
     else
         GitTreeState=clean

@@ -14,7 +14,7 @@ import (
 type Client struct {
 	conn    net.Conn
 	enc     *bufio.Writer
-	dec     *Reader
+	dec     *reader
 	mu      sync.Mutex
 	seq     int64
 	Room    string
@@ -40,7 +40,7 @@ func dial(ctx context.Context, addr, room, user string, ephemeral bool) (*Client
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", addr, err)
 	}
-	c := &Client{conn: nc, enc: bufio.NewWriter(nc), dec: NewReader(nc)}
+	c := &Client{conn: nc, enc: bufio.NewWriter(nc), dec: newReader(nc)}
 	hello := Frame{Type: TypeHello, Room: room, User: SanitizeName(user), Host: hostName(), Role: RoleClient, Ephemeral: ephemeral}
 	if err := c.send(hello); err != nil {
 		_ = nc.Close()
@@ -68,7 +68,7 @@ func dial(ctx context.Context, addr, room, user string, ephemeral bool) (*Client
 func (c *Client) send(f Frame) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := Write(c.enc, f); err != nil {
+	if err := writeFrame(c.enc, f); err != nil {
 		return err
 	}
 	return c.enc.Flush()
@@ -76,7 +76,7 @@ func (c *Client) send(f Frame) error {
 
 // Send delivers one chat message and returns its sequence number.
 func (c *Client) Send(body string) (int64, error) {
-	if err := wireBody(body); err != nil {
+	if err := validateBody(body); err != nil {
 		return 0, err
 	}
 	c.mu.Lock()

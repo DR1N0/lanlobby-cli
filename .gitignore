@@ -3,3 +3,7 @@
 /coverage.out
 *.test
 /lanlobby.exe
+
+.DS_Store
+.idea/
+.vscode/

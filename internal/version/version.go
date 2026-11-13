@@ -4,7 +4,7 @@ package version
 import "runtime"
 
 var (
-	gitVersion   = "v0.0.1"
+	gitVersion   = "dev"
 	gitCommit    = "unknown"
 	gitTreeState = "unknown"
 	buildDate    = "unknown"
