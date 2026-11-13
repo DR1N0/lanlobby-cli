@@ -20,7 +20,7 @@ import (
 
 const Usage = `Usage:
   lanlobby serve ROOM [--as NAME] [--listen ADDR] [--peer ADDR ...] [--advertise IP] [--debug]
-  lanlobby join ROOM [--as NAME] [--peer ADDR] [--read-only] [--json]
+  lanlobby join ROOM [--as NAME] [--peer ADDR] [--read-only] [--no-self] [--json]
   lanlobby say ROOM MESSAGE [--as NAME] [--peer ADDR]
   lanlobby peers ROOM [--peer ADDR] [--json]
   lanlobby version [--short] [--json]
@@ -48,6 +48,7 @@ type Command struct {
 	JSON      bool
 	Short     bool
 	ReadOnly  bool
+	NoSelf    bool
 }
 
 // Parse accepts flags in any position, collects positional arguments, and
@@ -66,7 +67,7 @@ func Parse(args []string) (Command, error) {
 	case "serve":
 		allowed = map[string]bool{"as": true, "peer": true, "listen": true, "advertise": true, "debug": true}
 	case "join":
-		allowed = map[string]bool{"as": true, "peer": true, "read-only": true, "json": true}
+		allowed = map[string]bool{"as": true, "peer": true, "read-only": true, "no-self": true, "json": true}
 	case "say":
 		allowed = map[string]bool{"as": true, "peer": true}
 	case "peers":
@@ -134,6 +135,8 @@ func Parse(args []string) (Command, error) {
 			c.JSON = true
 		case "read-only":
 			c.ReadOnly = true
+		case "no-self":
+			c.NoSelf = true
 		case "short":
 			c.Short = true
 		case "help", "h":
@@ -366,7 +369,7 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 				if _, err := client.Send(line); err != nil {
 					return
 				}
-				if !c.JSON {
+				if !c.JSON && !c.NoSelf {
 					_, _ = fmt.Fprintf(opts.Output, "%s: %s\n", room.SafeText(client.User), room.SafeText(line))
 				}
 			}
@@ -374,6 +377,9 @@ func runJoin(ctx context.Context, c Command, opts Options) error {
 	}
 
 	err = client.Receive(joinCtx, func(f room.Frame) {
+		if f.Type == room.TypeMessage && c.NoSelf && f.User == client.User {
+			return
+		}
 		if c.JSON {
 			_, _ = fmt.Fprintln(opts.Output, frameJSON(f))
 			return
