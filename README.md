@@ -43,12 +43,12 @@ Alternatively, `go install ./cmd/lanlobby` installs into `GOBIN`, or `$(go env G
 
 ```bash
 lanlobby version
-# lanlobby   v0.0.1
-#   commit   2f31c9e3a1b2c3d4e5f60718293a4b5c6d7e8f90
-#   state    clean
-#   built    2026-11-13T11:06:12Z
-#   go       go1.26.0
-#   platform darwin/arm64
+#   lanlobby  v0.0.1
+#   commit    2f31c9e3a1b2c3d4e5f60718293a4b5c6d7e8f90
+#   state     clean
+#   built     2026-11-13T11:06:12Z
+#   go        go1.26.0
+#   platform  darwin/arm64
 
 lanlobby version --short
 # v0.0.1
@@ -88,10 +88,10 @@ It prints how to join from this machine and from others:
 
 ```text
 lanlobby serve: room "dev" as "mac"
-  listening 192.168.1.6:7717
-  from this machine:    lanlobby join dev --as alice
-  from another machine: lanlobby join dev --as alice --peer 192.168.1.6:7717
-  add another node:     lanlobby serve dev --as <name> --peer 192.168.1.6:7717
+  listening             192.168.1.6:7717
+  from this machine     lanlobby join dev --as alice
+  from another machine  lanlobby join dev --as alice --peer 192.168.1.6:7717
+  add another node      lanlobby serve dev --as <name> --peer 192.168.1.6:7717
 ```
 
 `--listen 0.0.0.0:7717` is the default. A node holds the room, relays messages between its clients and peer nodes, and keeps no history.

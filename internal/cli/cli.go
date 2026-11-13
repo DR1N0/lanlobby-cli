@@ -244,7 +244,7 @@ func runVersion(c Command, opts Options) int {
 	}
 	w := tabwriter.NewWriter(opts.Output, 0, 0, 2, ' ', 0)
 	for _, row := range [][2]string{
-		{"lanlobby", v.GitVersion},
+		{"  lanlobby", v.GitVersion},
 		{"  commit", v.GitCommit},
 		{"  state", v.GitTreeState},
 		{"  built", v.BuildDate},
@@ -307,20 +307,22 @@ func runServe(ctx context.Context, c Command, opts Options) error {
 
 func printServeBanner(out io.Writer, roomName, name, ip, port string) {
 	_, _ = fmt.Fprintf(out, "lanlobby serve: room %q as %q\n", roomName, name)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	if ip == "" {
-		_, _ = fmt.Fprintf(out, "  listening on port %s\n", port)
+		_, _ = fmt.Fprintf(w, "  listening\tport %s\n", port)
 	} else {
-		_, _ = fmt.Fprintf(out, "  listening %s:%s\n", ip, port)
+		_, _ = fmt.Fprintf(w, "  listening\t%s:%s\n", ip, port)
 	}
 	if port == "7717" {
-		_, _ = fmt.Fprintf(out, "  from this machine:    lanlobby join %s --as alice\n", roomName)
+		_, _ = fmt.Fprintf(w, "  from this machine\tlanlobby join %s --as alice\n", roomName)
 	} else {
-		_, _ = fmt.Fprintf(out, "  from this machine:    lanlobby join %s --as alice --peer 127.0.0.1:%s\n", roomName, port)
+		_, _ = fmt.Fprintf(w, "  from this machine\tlanlobby join %s --as alice --peer 127.0.0.1:%s\n", roomName, port)
 	}
 	if ip != "" && !isLoopback(ip) {
-		_, _ = fmt.Fprintf(out, "  from another machine: lanlobby join %s --as alice --peer %s:%s\n", roomName, ip, port)
-		_, _ = fmt.Fprintf(out, "  add another node:     lanlobby serve %s --as <name> --peer %s:%s\n", roomName, ip, port)
+		_, _ = fmt.Fprintf(w, "  from another machine\tlanlobby join %s --as alice --peer %s:%s\n", roomName, ip, port)
+		_, _ = fmt.Fprintf(w, "  add another node\tlanlobby serve %s --as <name> --peer %s:%s\n", roomName, ip, port)
 	}
+	_ = w.Flush()
 	_, _ = fmt.Fprintln(out)
 }
 
